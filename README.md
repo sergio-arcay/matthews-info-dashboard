@@ -1,13 +1,15 @@
 # Matthews Info Dashboard
 
-Aplicación web con backend y frontend integrados. El backend define la distribución de bloques, expone el HTML de cada bloque y controla los tiempos de actualización. El frontend recibe esa configuración, renderiza los bloques y refresca cada uno de forma paralela e independiente.
+Dashboard informativo generico para pantallas fijas, con backend y frontend integrados:
+- El backend define la distribución de bloques (layout), expone el HTML de cada bloque y controla los tiempos de actualización.
+- El frontend consume esa configuración, renderiza los bloques y refresca cada uno en paralelo de forma independiente.
 
 ## Requisitos
 
 - Python 3.13+
 - Poetry
 
-## Instalación y ejecución
+## Instalación y ejecución (local)
 
 ```bash
 poetry install
@@ -18,17 +20,30 @@ Luego abre `http://localhost:8000`.
 
 ## Docker
 
+### Build y ejecución directa
+
+```bash
+docker build -t mid .
+docker run --rm -p 8000:8000 mid
+```
+
+### Docker Compose
+
 ```bash
 docker compose up --build
 ```
 
-El servicio expone `http://localhost:8000`.
+El servicio expone `http://localhost:8000` y monta `./src` dentro del contenedor para iterar sin reconstruir.
+
+Notas:
+- El contenedor instala herramientas de red necesarias para métricas (por ejemplo, `speedtest`, `ping`, `ip`), además de Python/Poetry.
+- Si actualizas dependencias Python, reconstruye la imagen (`--build`).
 
 ## Endpoints
 
 - `GET /` → Frontend (dashboard).
 - `GET /api/layout` → Distribución completa del dashboard (grid + bloques + tiempos).
-- `GET /api/layout?panel=raspi-dashboard` → Layout personalizado (2x2 con clock).
+- `GET /api/layout?panel=raspi-dashboard` → Layout personalizado (2x2 con paneles definidos).
 - `GET /api/blocks/{block_id}` → HTML + tiempo de actualización para un bloque específico.
 - `GET /api/health` → Health check.
 
@@ -89,7 +104,7 @@ El servicio expone `http://localhost:8000`.
 
 Cada bloque es **una clase única en su propio archivo**, con la misma interfaz. Pasos:
 
-1. Crear un archivo nuevo en `src/mid/blocks/`, por ejemplo `weather.py`.
+1. Crear un archivo nuevo en `src/mid/blocks/general/` (o el paquete que uses), por ejemplo `weather.py`.
 2. Definir una clase que herede `BaseBlock`.
 3. Implementar `render()` y devolver `BlockRender`.
 4. Asignar `id`, `title`, `refresh_seconds`, `col_span`, `row_span` y opcionalmente `col`/`row`.
@@ -122,13 +137,13 @@ class WeatherBlock(BaseBlock):
         return BlockRender(html=html, refresh_seconds=self.refresh_seconds)
 ```
 
-El registro es automático. No hay que tocar más archivos: el backend detecta módulos dentro de `mid.blocks`.
+El registro es automático. El backend detecta módulos dentro de los paquetes configurados en `BlockRegistry` (por defecto `mid.blocks.general` y `mid.blocks.examples`). Si creas un nuevo paquete, añade su nombre en `packages_to_scan`.
 
 ### Reglas para el HTML del bloque
 
 - Solo HTML (sin `<script>`).
 - Usa clases existentes (`block-header`, `block-title`, `block-body`) para estilos coherentes.
-- Puedes añadir clases propias para estilos específicos en `styles.css`.
+- Para estilos específicos del bloque, inyecta CSS desde el script del bloque (evita contaminar el CSS global).
 
 ### Scripts por bloque (frontend)
 
@@ -169,8 +184,32 @@ Puedes cambiar la grilla global en `default_grid()`:
 return GridConfig(columns=10, row_height=140, gap=16, padding=20)
 ```
 
-Si `row_height` es `null` o `<= 0`, el frontend calcula automáticamente la altura
-de fila para rellenar el alto disponible del dashboard según el número de filas.
+Si `row_height` es `null` o `<= 0`, el frontend calcula automáticamente la altura de fila para rellenar el alto disponible del dashboard según el número de filas.
+
+### Crear paneles personalizados
+
+1. Define un nuevo panel en `src/mid/layout/panels.py` (función `build_panel`).
+2. Construye una lista de `BlockLayout` con posiciones explícitas.
+3. Accede al panel desde el frontend con `?panel=tu-panel`.
+
+Ejemplo mínimo:
+
+```python
+def build_panel(panel_id: str, registry: BlockRegistry) -> PanelLayout | None:
+    if panel_id == "mi-panel":
+        return PanelLayout(
+            grid=GridConfig(columns=2, row_height=None, gap=12, padding=16),
+            blocks=[
+                BlockLayout(
+                    id="clock",
+                    title="Hora",
+                    refresh_seconds=5,
+                    position=BlockPosition(col=1, row=1, col_span=1, row_span=1),
+                )
+            ],
+        )
+    return None
+```
 
 ## Frontend
 
@@ -180,4 +219,4 @@ El frontend no conoce los bloques; solo interpreta lo que envía el backend.
 - Si la URL incluye `?panel=...`, solicita ese panel al backend.
 - Cada bloque usa el `refresh_seconds` de la última respuesta del backend.
 - Si un bloque falla, se reintenta automáticamente cada 10 segundos.
-- Si `refresh_seconds` es `null` o `<= 0`, no se agenda refresco automático para ese bloque.
+- Si `refresh_seconds` es `null` o `<= 0`, no se realiza refresco automático para ese bloque.
