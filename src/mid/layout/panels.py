@@ -20,30 +20,40 @@ def build_panel(panel_id: str, registry: BlockRegistry) -> PanelLayout | None:
 
 def _build_raspi_dashboard(registry: BlockRegistry) -> PanelLayout | None:
     clock = registry.get("clock")
-    if clock is None:
+    weather_clock = registry.get("weather-clock")
+    network_status = registry.get("network-status")
+    if clock is None or weather_clock is None or network_status is None:
         return None
 
     grid = GridConfig(columns=2, row_height=None, gap=12, padding=16)
-    positions = [
-        (1, 1),
-        (2, 1),
-        (1, 2),
-        (2, 2),
+    blocks: list[BlockLayout] = [
+        BlockLayout(
+            id=f"{weather_clock.id}-1",
+            title=weather_clock.title,
+            refresh_seconds=weather_clock.refresh_seconds,
+            position=BlockPosition(col=1, row=1, col_span=1, row_span=1),
+            min_height=None,
+        ),
+        BlockLayout(
+            id=f"{weather_clock.id}-2",
+            title=weather_clock.title,
+            refresh_seconds=weather_clock.refresh_seconds,
+            position=BlockPosition(col=2, row=1, col_span=1, row_span=1),
+            min_height=None,
+        ),
+        BlockLayout(
+            id=network_status.id,
+            title=network_status.title,
+            refresh_seconds=network_status.refresh_seconds,
+            position=BlockPosition(col=1, row=2, col_span=1, row_span=1),
+            min_height=None,
+        ),
+        BlockLayout(
+            id=f"{weather_clock.id}-3",
+            title=weather_clock.title,
+            refresh_seconds=weather_clock.refresh_seconds,
+            position=BlockPosition(col=2, row=2, col_span=1, row_span=1),
+            min_height=None,
+        ),
     ]
-    blocks: list[BlockLayout] = []
-    for idx, (col, row) in enumerate(positions, start=1):
-        blocks.append(
-            BlockLayout(
-                id=f"{clock.id}-{idx}",
-                title=clock.title,
-                refresh_seconds=clock.refresh_seconds,
-                position=BlockPosition(
-                    col=col,
-                    row=row,
-                    col_span=1,
-                    row_span=1,
-                ),
-                min_height=None,
-            )
-        )
     return PanelLayout(grid=grid, blocks=blocks)

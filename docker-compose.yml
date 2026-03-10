@@ -1,9 +1,10 @@
 services:
 
   raspi-dashboard:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: mid  # docker build -t mid .
+    container_name: mid_raspi_dashboard
     ports:
       - "8000:8000"
+    volumes:
+      - ./src:/app/src
     restart: unless-stopped

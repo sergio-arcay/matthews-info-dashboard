@@ -7,7 +7,19 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir poetry
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        gnupg \
+    && curl -s https://packagecloud.io/install/repositories/ookla/speedtest-cli/script.deb.sh | bash \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        iproute2 \
+        iputils-ping \
+        speedtest \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir poetry
 
 COPY pyproject.toml poetry.lock README.md ./
 COPY src ./src
