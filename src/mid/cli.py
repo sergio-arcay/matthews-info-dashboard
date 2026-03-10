@@ -14,9 +14,9 @@ def _ensure_src_on_path() -> None:
 
 def dev() -> None:
     _ensure_src_on_path()
-    uvicorn.run("mid.main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("mid.main:app", host="0.0.0.0", port=8001, reload=True)
 
 
 def start() -> None:
     _ensure_src_on_path()
-    uvicorn.run("mid.main:app", host="0.0.0.0", port=8000)
+    uvicorn.run("mid.main:app", host="0.0.0.0", port=8001)

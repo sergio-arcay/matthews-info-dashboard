@@ -16,7 +16,7 @@ poetry install
 poetry run dev
 ```
 
-Luego abre `http://localhost:8000`.
+Luego abre `http://localhost:8001`.
 
 ## Docker
 
@@ -24,7 +24,7 @@ Luego abre `http://localhost:8000`.
 
 ```bash
 docker build -t mid .
-docker run --rm -p 8000:8000 mid
+docker run --rm -p 8001:8001 mid  # Usar network mode host en vez de ports si es necesario recoger info de la red  
 ```
 
 ### Docker Compose
@@ -33,7 +33,7 @@ docker run --rm -p 8000:8000 mid
 docker compose up --build
 ```
 
-El servicio expone `http://localhost:8000` y monta `./src` dentro del contenedor para iterar sin reconstruir.
+El servicio expone `http://localhost:8001` y monta `./src` dentro del contenedor para iterar sin reconstruir.
 
 Notas:
 - El contenedor instala herramientas de red necesarias para métricas (por ejemplo, `speedtest`, `ping`, `ip`), además de Python/Poetry.

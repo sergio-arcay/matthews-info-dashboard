@@ -26,6 +26,6 @@ COPY src ./src
 
 RUN poetry install --only main --no-ansi
 
-EXPOSE 8000
+EXPOSE 8001
 
 CMD ["poetry", "run", "start"]

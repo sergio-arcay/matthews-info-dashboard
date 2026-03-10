@@ -3,8 +3,9 @@ services:
   raspi-dashboard:
     image: mid  # docker build -t mid .
     container_name: mid_raspi_dashboard
-    ports:
-      - "8000:8000"
+    network_mode: host  # Para poder recoger información de red. Comentar si no es necesario y usar ports.
+#    ports:
+#      - "8001:8001"
     volumes:
       - ./src:/app/src
     restart: unless-stopped
