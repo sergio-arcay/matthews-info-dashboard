@@ -2,13 +2,45 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import datetime
 from urllib.error import URLError
+from urllib.parse import urlencode
 from urllib.request import urlopen
 
 from mid.blocks.base import BaseBlock, BlockRender
 
 _LOCATION_CACHE: tuple[float, dict[str, object]] | None = None
 _LOCATION_TTL_SECONDS = 60 * 60
+_WEATHER_CODES = {
+    0: "Despejado",
+    1: "Principalmente despejado",
+    2: "Parcialmente nublado",
+    3: "Nublado",
+    45: "Niebla",
+    48: "Niebla con escarcha",
+    51: "Llovizna ligera",
+    53: "Llovizna moderada",
+    55: "Llovizna intensa",
+    56: "Llovizna helada",
+    57: "Llovizna helada intensa",
+    61: "Lluvia ligera",
+    63: "Lluvia moderada",
+    65: "Lluvia intensa",
+    66: "Lluvia helada",
+    67: "Lluvia helada intensa",
+    71: "Nieve ligera",
+    73: "Nieve moderada",
+    75: "Nieve intensa",
+    77: "Granizo",
+    80: "Chubascos ligeros",
+    81: "Chubascos moderados",
+    82: "Chubascos intensos",
+    85: "Chubascos de nieve",
+    86: "Chubascos de nieve intensos",
+    95: "Tormenta",
+    96: "Tormenta con granizo",
+    99: "Tormenta fuerte con granizo",
+}
 
 
 class WeatherClockBlock(BaseBlock):
@@ -24,46 +56,57 @@ class WeatherClockBlock(BaseBlock):
 
     def render(self) -> BlockRender:
         location = _resolve_location()
-        location_json = json.dumps(location)
+        weather = _fetch_weather(location)
+        location_name = str(location.get("name") or "Local")
+        temp_label = _format_temp(weather.get("temperature"))
+        feels_label = _format_temp(weather.get("feels"))
+        humidity_label = _format_value(weather.get("humidity"), "%")
+        wind_label = _format_value(weather.get("wind"), " km/h")
+        condition_label = weather.get("condition") or "Sin datos"
+        rain_morning = _format_percent(weather.get("rain_morning"))
+        rain_afternoon = _format_percent(weather.get("rain_afternoon"))
+        rain_night = _format_percent(weather.get("rain_night"))
+        updated_at = weather.get("updated_at") or datetime.now().astimezone()
+        updated_label = f"Actualizado {updated_at.strftime('%H:%M')}"
         html = f"""
         <div class="block-header">
             <h2 class="block-title">{self.title}</h2>
-            <span class="block-tag" data-weather-location>{location.get("name", "Local")}</span>
+            <span class="block-tag" data-weather-location>{location_name}</span>
         </div>
         <div class="block-body weather-clock-body">
             <div class="weather-clock-main">
                 <div class="weather-clock-time" data-weather-time>--:--</div>
                 <div class="weather-clock-weekday" data-weather-weekday>--</div>
                 <div class="weather-clock-date" data-weather-date>--</div>
-                <div class="weather-updated" data-weather-updated>Actualizado --</div>
+                <div class="weather-updated" data-weather-updated>{updated_label}</div>
             </div>
             <div class="weather-clock-weather">
-                <div class="weather-temp" data-weather-temp>--</div>
-                <div class="weather-condition" data-weather-condition>Sin datos</div>
+                <div class="weather-temp" data-weather-temp>{temp_label}</div>
+                <div class="weather-condition" data-weather-condition>{condition_label}</div>
                 <div class="weather-meta">
                     <div class="weather-chip">
                         <span>Humedad</span>
-                        <strong data-weather-humidity>--</strong>
+                        <strong data-weather-humidity>{humidity_label}</strong>
                     </div>
                     <div class="weather-chip">
                         <span>Viento</span>
-                        <strong data-weather-wind>--</strong>
+                        <strong data-weather-wind>{wind_label}</strong>
                     </div>
                     <div class="weather-chip">
                         <span>Sensa.</span>
-                        <strong data-weather-feels>--</strong>
+                        <strong data-weather-feels>{feels_label}</strong>
                     </div>
                     <div class="weather-chip">
                         <span>Lluvia mañana</span>
-                        <strong data-weather-rain-morning>--</strong>
+                        <strong data-weather-rain-morning>{rain_morning}</strong>
                     </div>
                     <div class="weather-chip">
                         <span>Lluvia tarde</span>
-                        <strong data-weather-rain-afternoon>--</strong>
+                        <strong data-weather-rain-afternoon>{rain_afternoon}</strong>
                     </div>
                     <div class="weather-chip">
                         <span>Lluvia noche</span>
-                        <strong data-weather-rain-night>--</strong>
+                        <strong data-weather-rain-night>{rain_night}</strong>
                     </div>
                 </div>
             </div>
@@ -74,16 +117,6 @@ class WeatherClockBlock(BaseBlock):
             const timeEl = context.blockEl.querySelector("[data-weather-time]");
             const dateEl = context.blockEl.querySelector("[data-weather-date]");
             const weekdayEl = context.blockEl.querySelector("[data-weather-weekday]");
-            const locationEl = context.blockEl.querySelector("[data-weather-location]");
-            const updatedEl = context.blockEl.querySelector("[data-weather-updated]");
-            const tempEl = context.blockEl.querySelector("[data-weather-temp]");
-            const conditionEl = context.blockEl.querySelector("[data-weather-condition]");
-            const humidityEl = context.blockEl.querySelector("[data-weather-humidity]");
-            const windEl = context.blockEl.querySelector("[data-weather-wind]");
-            const feelsEl = context.blockEl.querySelector("[data-weather-feels]");
-            const rainMorningEl = context.blockEl.querySelector("[data-weather-rain-morning]");
-            const rainAfternoonEl = context.blockEl.querySelector("[data-weather-rain-afternoon]");
-            const rainNightEl = context.blockEl.querySelector("[data-weather-rain-night]");
             if (!timeEl || !dateEl || !weekdayEl) return;
 
             const styleId = "weather-clock-styles";
@@ -178,11 +211,6 @@ class WeatherClockBlock(BaseBlock):
               document.head.appendChild(style);
             }
 
-            const defaultLocation = __DEFAULT_LOCATION__;
-            if (!window.weatherClockLocation) {
-              window.weatherClockLocation = defaultLocation;
-            }
-
             const timerKey = "weatherClockTimer";
             const existingTimer = context.blockEl.dataset[timerKey];
             if (existingTimer) {
@@ -214,176 +242,7 @@ class WeatherClockBlock(BaseBlock):
             const intervalId = window.setInterval(updateClock, 1000);
             context.blockEl.dataset[timerKey] = String(intervalId);
 
-            const weatherCodes = {
-              0: "Despejado",
-              1: "Principalmente despejado",
-              2: "Parcialmente nublado",
-              3: "Nublado",
-              45: "Niebla",
-              48: "Niebla con escarcha",
-              51: "Llovizna ligera",
-              53: "Llovizna moderada",
-              55: "Llovizna intensa",
-              56: "Llovizna helada",
-              57: "Llovizna helada intensa",
-              61: "Lluvia ligera",
-              63: "Lluvia moderada",
-              65: "Lluvia intensa",
-              66: "Lluvia helada",
-              67: "Lluvia helada intensa",
-              71: "Nieve ligera",
-              73: "Nieve moderada",
-              75: "Nieve intensa",
-              77: "Granizo",
-              80: "Chubascos ligeros",
-              81: "Chubascos moderados",
-              82: "Chubascos intensos",
-              85: "Chubascos de nieve",
-              86: "Chubascos de nieve intensos",
-              95: "Tormenta",
-              96: "Tormenta con granizo",
-              99: "Tormenta fuerte con granizo",
-            };
-
-            async function resolveLocation() {
-              const current = window.weatherClockLocation || {};
-              const hasCoords = Number.isFinite(current.lat) && Number.isFinite(current.lon);
-              if (hasCoords) return current;
-              try {
-                const response = await fetch("https://ipapi.co/json/");
-                if (response.ok) {
-                  const data = await response.json();
-                  const nameParts = [data.city, data.region, data.country_name].filter(Boolean);
-                  const name = nameParts.join(", ") || "Local";
-                  const lat = Number(data.latitude);
-                  const lon = Number(data.longitude);
-                  if (Number.isFinite(lat) && Number.isFinite(lon)) {
-                    const resolved = { name, lat, lon };
-                    window.weatherClockLocation = resolved;
-                    return resolved;
-                  }
-                }
-              } catch (error) {
-                console.warn("No se pudo resolver ubicacion", error);
-              }
-              return current;
-            }
-
-            function formatTemp(value) {
-              if (!Number.isFinite(value)) return "--";
-              return `${value.toFixed(1)}°C`;
-            }
-
-            function formatValue(value, suffix) {
-              if (!Number.isFinite(value)) return "--";
-              return `${value.toFixed(0)}${suffix}`;
-            }
-
-            function formatPercent(value) {
-              if (!Number.isFinite(value)) return "--";
-              return `${Math.round(value)}%`;
-            }
-
-            function computeRainChances(payload) {
-              const hourly = payload.hourly || {};
-              const times = Array.isArray(hourly.time) ? hourly.time : [];
-              const probs = Array.isArray(hourly.precipitation_probability)
-                ? hourly.precipitation_probability
-                : [];
-              if (!times.length || times.length !== probs.length) return null;
-              const baseTime = payload.current?.time || times[0];
-              const dateKey = typeof baseTime === "string" ? baseTime.split("T")[0] : null;
-              if (!dateKey) return null;
-
-              const buckets = {
-                morning: [],
-                afternoon: [],
-                night: [],
-              };
-              for (let i = 0; i < times.length; i += 1) {
-                const timeStr = times[i];
-                if (typeof timeStr !== "string") continue;
-                const [datePart, hourPart] = timeStr.split("T");
-                if (datePart !== dateKey) continue;
-                const hour = Number(hourPart?.slice(0, 2));
-                if (!Number.isFinite(hour)) continue;
-                if (hour >= 7 && hour < 13) {
-                  buckets.morning.push(Number(probs[i]));
-                } else if (hour >= 13 && hour < 21) {
-                  buckets.afternoon.push(Number(probs[i]));
-                } else if (hour >= 21 && hour < 24) {
-                  buckets.night.push(Number(probs[i]));
-                }
-              }
-
-              function maxOrNull(values) {
-                const filtered = values.filter((v) => Number.isFinite(v));
-                if (!filtered.length) return null;
-                return Math.max(...filtered);
-              }
-
-              return {
-                morning: maxOrNull(buckets.morning),
-                afternoon: maxOrNull(buckets.afternoon),
-                night: maxOrNull(buckets.night),
-              };
-            }
-
-            async function updateWeather() {
-              const location = await resolveLocation();
-              if (locationEl && location && location.name) {
-                locationEl.textContent = location.name;
-              }
-              if (!location || !Number.isFinite(location.lat) || !Number.isFinite(location.lon)) {
-                if (conditionEl) conditionEl.textContent = "Sin ubicacion";
-                return;
-              }
-              const url = `https://api.open-meteo.com/v1/forecast?latitude=${location.lat}&longitude=${location.lon}&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weather_code&hourly=precipitation_probability&forecast_days=1&timezone=auto`;
-              try {
-                const response = await fetch(url);
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                const payload = await response.json();
-                const current = payload.current || {};
-                const temp = Number(current.temperature_2m);
-                const feels = Number(current.apparent_temperature);
-                const humidity = Number(current.relative_humidity_2m);
-                const wind = Number(current.wind_speed_10m);
-                const code = Number(current.weather_code);
-                const label = weatherCodes[code] || "Condicion variable";
-                if (tempEl) tempEl.textContent = formatTemp(temp);
-                if (feelsEl) feelsEl.textContent = formatTemp(feels);
-                if (humidityEl) humidityEl.textContent = formatValue(humidity, "%");
-                if (windEl) windEl.textContent = formatValue(wind, " km/h");
-                if (conditionEl) conditionEl.textContent = label;
-                const rain = computeRainChances(payload);
-                if (rainMorningEl) {
-                  rainMorningEl.textContent = rain ? formatPercent(rain.morning) : "--";
-                }
-                if (rainAfternoonEl) {
-                  rainAfternoonEl.textContent = rain ? formatPercent(rain.afternoon) : "--";
-                }
-                if (rainNightEl) {
-                  rainNightEl.textContent = rain ? formatPercent(rain.night) : "--";
-                }
-                if (updatedEl) {
-                  const now = new Date();
-                  updatedEl.textContent = `Actualizado ${formatterTime.format(now)}`;
-                }
-              } catch (error) {
-                if (conditionEl) conditionEl.textContent = "Sin datos";
-              }
-            }
-
-            updateWeather();
-            const weatherTimerKey = "weatherClockWeatherTimer";
-            const existingWeatherTimer = context.blockEl.dataset[weatherTimerKey];
-            if (existingWeatherTimer) {
-              window.clearInterval(Number(existingWeatherTimer));
-            }
-            const weatherInterval = window.setInterval(updateWeather, 5 * 60 * 1000);
-            context.blockEl.dataset[weatherTimerKey] = String(weatherInterval);
             """.strip()
-        script = script.replace("__DEFAULT_LOCATION__", location_json)
         scripts_after = [script]
         return BlockRender(
             html=html,
@@ -431,3 +290,133 @@ def _fetch_location_from_ipapi() -> dict[str, object]:
         return {"name": name, "lat": None, "lon": None}
 
     return {"name": name, "lat": lat_val, "lon": lon_val}
+
+
+def _fetch_weather(location: dict[str, object]) -> dict[str, object]:
+    lat = _to_float(location.get("lat"))
+    lon = _to_float(location.get("lon"))
+    if lat is None or lon is None:
+        return {"condition": "Sin ubicacion"}
+
+    query = urlencode(
+        {
+            "latitude": lat,
+            "longitude": lon,
+            "current": "temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weather_code",
+            "hourly": "precipitation_probability",
+            "forecast_days": 1,
+            "timezone": "auto",
+        }
+    )
+    url = f"https://api.open-meteo.com/v1/forecast?{query}"
+    try:
+        with urlopen(url, timeout=3) as response:
+            payload = json.load(response)
+    except (URLError, ValueError):
+        return {}
+
+    current = payload.get("current") if isinstance(payload, dict) else {}
+    if not isinstance(current, dict):
+        current = {}
+
+    temp = _to_float(current.get("temperature_2m"))
+    feels = _to_float(current.get("apparent_temperature"))
+    humidity = _to_float(current.get("relative_humidity_2m"))
+    wind = _to_float(current.get("wind_speed_10m"))
+    code = _to_int(current.get("weather_code"))
+    condition = _WEATHER_CODES.get(code, "Condicion variable") if code is not None else None
+
+    rain = _compute_rain_chances(payload) if isinstance(payload, dict) else None
+
+    return {
+        "temperature": temp,
+        "feels": feels,
+        "humidity": humidity,
+        "wind": wind,
+        "condition": condition,
+        "rain_morning": rain.get("morning") if rain else None,
+        "rain_afternoon": rain.get("afternoon") if rain else None,
+        "rain_night": rain.get("night") if rain else None,
+        "updated_at": datetime.now().astimezone(),
+    }
+
+
+def _compute_rain_chances(payload: dict[str, object]) -> dict[str, float | None] | None:
+    hourly = payload.get("hourly")
+    if not isinstance(hourly, dict):
+        return None
+    times = hourly.get("time")
+    probs = hourly.get("precipitation_probability")
+    if not isinstance(times, list) or not isinstance(probs, list) or len(times) != len(probs):
+        return None
+    if not times:
+        return None
+
+    base_time = payload.get("current", {}).get("time") if isinstance(payload.get("current"), dict) else None
+    if not isinstance(base_time, str):
+        base_time = times[0] if isinstance(times[0], str) else None
+    if not isinstance(base_time, str) or "T" not in base_time:
+        return None
+    date_key = base_time.split("T", 1)[0]
+
+    buckets: dict[str, list[float]] = {"morning": [], "afternoon": [], "night": []}
+    for time_str, prob in zip(times, probs):
+        if not isinstance(time_str, str):
+            continue
+        parts = time_str.split("T", 1)
+        if len(parts) != 2 or parts[0] != date_key:
+            continue
+        hour_str = parts[1][:2]
+        hour = _to_int(hour_str)
+        if hour is None:
+            continue
+        value = _to_float(prob)
+        if value is None:
+            continue
+        if 7 <= hour < 13:
+            buckets["morning"].append(value)
+        elif 13 <= hour < 21:
+            buckets["afternoon"].append(value)
+        elif 21 <= hour < 24:
+            buckets["night"].append(value)
+
+    def max_or_none(values: list[float]) -> float | None:
+        return max(values) if values else None
+
+    return {
+        "morning": max_or_none(buckets["morning"]),
+        "afternoon": max_or_none(buckets["afternoon"]),
+        "night": max_or_none(buckets["night"]),
+    }
+
+
+def _format_temp(value: float | None) -> str:
+    if value is None:
+        return "--"
+    return f"{value:.1f}°C"
+
+
+def _format_value(value: float | None, suffix: str) -> str:
+    if value is None:
+        return "--"
+    return f"{value:.0f}{suffix}"
+
+
+def _format_percent(value: float | None) -> str:
+    if value is None:
+        return "--"
+    return f"{round(value)}%"
+
+
+def _to_float(value: object) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _to_int(value: object) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None

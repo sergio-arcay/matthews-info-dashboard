@@ -27,6 +27,7 @@ class BlockRegistry:
         packages_to_scan = [
             "mid.blocks.examples",
             "mid.blocks.general",
+            "mid.blocks.info",
         ]
         for pkg_name in packages_to_scan:
             package = importlib.import_module(pkg_name)
